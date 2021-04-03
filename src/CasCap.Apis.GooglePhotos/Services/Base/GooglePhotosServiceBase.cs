@@ -542,20 +542,20 @@ namespace CasCap.Services
         }
 
         public Task<mediaItemsCreateResponse?> AddMediaItemsAsync(List<(string uploadToken, string FileName)> items, string? albumId = null,
-            GooglePhotosPositionType positionType = GooglePhotosPositionType.LAST_IN_ALBUM, string? relativeMediaItemId = null, string? relativeEnrichmentItemId = null)
+            GooglePhotosPositionType positionType = GooglePhotosPositionType.LAST_IN_ALBUM, string? relativeMediaItemId = null, string? relativeEnrichmentItemId = null, IProgress<Event> progress = null)
         {
             var uploadItems = new List<UploadItem>(items.Count);
             foreach (var item in items)
                 uploadItems.Add(new UploadItem(item.uploadToken, item.FileName));
-            return AddMediaItemsAsync(uploadItems, albumId, GetAlbumPosition(albumId, positionType, relativeMediaItemId, relativeEnrichmentItemId));
+            return AddMediaItemsAsync(uploadItems, albumId, GetAlbumPosition(albumId, positionType, relativeMediaItemId, relativeEnrichmentItemId), progress);
         }
 
         public Task<mediaItemsCreateResponse?> AddMediaItemsAsync(List<UploadItem> uploadItems, string? albumId = null,
-            GooglePhotosPositionType positionType = GooglePhotosPositionType.LAST_IN_ALBUM, string? relativeMediaItemId = null, string? relativeEnrichmentItemId = null)
-            => AddMediaItemsAsync(uploadItems, albumId, GetAlbumPosition(albumId, positionType, relativeMediaItemId, relativeEnrichmentItemId));
+            GooglePhotosPositionType positionType = GooglePhotosPositionType.LAST_IN_ALBUM, string? relativeMediaItemId = null, string? relativeEnrichmentItemId = null, IProgress<Event> progress = null)
+            => AddMediaItemsAsync(uploadItems, albumId, GetAlbumPosition(albumId, positionType, relativeMediaItemId, relativeEnrichmentItemId), progress);
 
         //would need renaming if made public
-        async Task<mediaItemsCreateResponse?> AddMediaItemsAsync(List<UploadItem> uploadItems, string? albumId, AlbumPosition? albumPosition)
+        async Task<mediaItemsCreateResponse?> AddMediaItemsAsync(List<UploadItem> uploadItems, string? albumId, AlbumPosition? albumPosition, IProgress<Event> progress = null)
         {
             if (uploadItems.IsNullOrEmpty())
                 throw new ArgumentNullException(nameof(uploadItems), $"Invalid {nameof(uploadItems)} quantity, must be >= 1");
@@ -576,6 +576,27 @@ namespace CasCap.Services
             var req = new { newMediaItems, albumId, albumPosition };
             var tpl = await PostJson<mediaItemsCreateResponse, Error>(RequestUris.POST_mediaItems_batchCreate, req);
             if (tpl.error is object) throw new GooglePhotosException(tpl.error);
+
+            if (progress is object)
+            {
+                //TODO: this wants to report the actually unique path of the file
+                var successes = tpl.result.newMediaItemResults
+                    .Where(nmr => nmr.status.message.Equals("Success"))
+                   .Select(nmr => new Result(nmr.mediaItem.filename, null, 100));
+
+                if (successes.Any()) {
+                    progress.Report(new Event(EventType.UploadComplete, successes.ToArray(), string.Empty));
+                }
+
+                var failures = tpl.result.newMediaItemResults
+                    .Where(nmr => !nmr.status.message.Equals("Success"))
+                    .Select(nmr => new Result(nmr.mediaItem.filename, null, 100));
+
+                if (failures.Any())
+                {
+                    progress.Report(new Event(EventType.UploadFailed, failures.ToArray(), string.Empty));
+                }
+            }
             return tpl.result;
         }
         #endregion
@@ -595,7 +616,7 @@ namespace CasCap.Services
         //https://developers.google.com/photos/library/guides/upload-media
         //https://developers.google.com/photos/library/guides/upload-media#uploading-bytes
         //https://developers.google.com/photos/library/guides/resumable-uploads
-        public async Task<string?> UploadMediaAsync(string path, GooglePhotosUploadMethod uploadMethod = GooglePhotosUploadMethod.ResumableMultipart, Action<int>? callback = null)
+        public async Task<string?> UploadMediaAsync(string path, GooglePhotosUploadMethod uploadMethod = GooglePhotosUploadMethod.ResumableMultipart,IProgress<Event>? callback = null)
         {
             if (!File.Exists(path)) throw new FileNotFoundException($"can't find '{path}'");
             var size = new FileInfo(path).Length;
@@ -717,8 +738,17 @@ namespace CasCap.Services
                             offset += bytes.Length;
                             RaiseUploadProgressEvent(new UploadProgressArgs(Path.GetFileName(path), size, batchIndex, offset, bytes.Length));
                             batchIndex++;
-                            //if (callback is object)
-                            //    callback(bytes.Length);
+                            if (callback is object)
+                            {
+                                callback.Report(
+                                    new Event(
+                                       EventType.UploadProgress
+                                        , new Result[] {
+                                             new Result(
+                                                Path.GetFileName(path), path, (int)(((float)offset / size) * 100))
+                                        }, String.Empty)
+                                );
+                            }
                             //if (bytes.Length < Upload_Chunk_Granularity)
                             //    break;//this was the last one
                             if (lastChunk)

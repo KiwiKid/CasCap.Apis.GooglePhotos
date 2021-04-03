@@ -2,6 +2,7 @@
 using CasCap.Models;
 using CasCap.Services;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -88,12 +89,34 @@ namespace CasCap.Apis.GooglePhotos.Tests
             var loginResult = await _googlePhotosSvc.LoginAsync();
             Assert.True(loginResult);
 
+            
+
             //upload multiple media items
             var filePaths1 = new[] { $"{_testFolder}test3.jpg", $"{_testFolder}test4.jpg" };
-            var response1 = await _googlePhotosSvc.UploadMultiple(filePaths1);
+            List<Event> events = new List<Event>();
+
+            var raiseEvent = new Progress<Event>((evt) =>
+            {
+                events.Add(evt);
+            });
+
+            var response1 = await _googlePhotosSvc.UploadMultiple(filePaths1, null, GooglePhotosUploadMethod.ResumableMultipart, raiseEvent);
             Assert.NotNull(response1);
             Assert.NotNull(response1.newMediaItemResults);
             Assert.True(response1.newMediaItemResults.Count == filePaths1.Length);
+
+
+
+            var expectedEvents = new List<Event>();// { new Event(EventType.UploadProgress, new Result[] { new Result( }) };
+
+            foreach(var path in filePaths1)
+			{
+                expectedEvents.Add(new Event(EventType.UploadProgress, new Result[] { new Result(path, 100) }, String.Empty));
+			}
+            expectedEvents.Add(new Event(EventType.UploadComplete, filePaths1.Select(fp => new Result(Path.GetFileName(fp), null, 100)).ToArray(), String.Empty));
+
+            
+            Assert.Equal(events, expectedEvents);
 
             //get or create new album
             var albumName = GetRandomAlbumName();
@@ -103,7 +126,7 @@ namespace CasCap.Apis.GooglePhotos.Tests
 
             //upload multiple media items, assign to album
             var filePaths2 = new[] { $"{_testFolder}test5.jpg", $"{_testFolder}test6.jpg" };
-            var response2 = await _googlePhotosSvc.UploadMultiple(filePaths2, album.id);
+            var response2 = await _googlePhotosSvc.UploadMultiple(filePaths2, album.id, GooglePhotosUploadMethod.ResumableMultipart, raiseEvent);
             Assert.NotNull(response2);
             Assert.NotNull(response2.newMediaItemResults);
             Assert.True(response2.newMediaItemResults.Count == filePaths2.Length);

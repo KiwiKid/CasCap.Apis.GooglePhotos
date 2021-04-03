@@ -47,26 +47,26 @@ namespace CasCap.Services
             return null;
         }
 
-        public Task<mediaItemsCreateResponse?> UploadMultiple(string[] filePaths, string? albumId = null, GooglePhotosUploadMethod uploadMethod = GooglePhotosUploadMethod.ResumableMultipart)
-            => _UploadMultiple(filePaths, albumId, uploadMethod);
+        public Task<mediaItemsCreateResponse?> UploadMultiple(string[] filePaths, string? albumId = null, GooglePhotosUploadMethod uploadMethod = GooglePhotosUploadMethod.ResumableMultipart, IProgress<Event>? callback = null)
+            => _UploadMultiple(filePaths, albumId, uploadMethod, callback);
 
-        public Task<mediaItemsCreateResponse?> UploadMultiple(string folderPath, string? searchPattern = null, string? albumId = null, GooglePhotosUploadMethod uploadMethod = GooglePhotosUploadMethod.ResumableMultipart)
+        public Task<mediaItemsCreateResponse?> UploadMultiple(string folderPath, string? searchPattern = null, string? albumId = null, GooglePhotosUploadMethod uploadMethod = GooglePhotosUploadMethod.ResumableMultipart, IProgress<Event>? callback = null)
         {
             var filePaths = searchPattern is object ? Directory.GetFiles(folderPath, searchPattern) : Directory.GetFiles(folderPath);
-            return _UploadMultiple(filePaths, albumId, uploadMethod);
+            return _UploadMultiple(filePaths, albumId, uploadMethod, callback);
         }
 
-        async Task<mediaItemsCreateResponse?> _UploadMultiple(string[] filePaths, string? albumId = null, GooglePhotosUploadMethod uploadMethod = GooglePhotosUploadMethod.ResumableMultipart)
+        async Task<mediaItemsCreateResponse?> _UploadMultiple(string[] filePaths, string? albumId = null, GooglePhotosUploadMethod uploadMethod = GooglePhotosUploadMethod.ResumableMultipart, IProgress<Event>? callback = null)
         {
             var uploadItems = new List<UploadItem>(filePaths.Length);
             foreach (var filePath in filePaths)
             {
-                var uploadToken = await UploadMediaAsync(filePath, uploadMethod);
+                var uploadToken = await UploadMediaAsync(filePath, uploadMethod, callback);
+
                 if (!string.IsNullOrWhiteSpace(uploadToken))
                     uploadItems.Add(new UploadItem(uploadToken!, filePath));
-                //todo: raise photo uploaded event here
             }
-            return await AddMediaItemsAsync(uploadItems, albumId);
+            return await AddMediaItemsAsync(uploadItems, albumId, GooglePhotosPositionType.LAST_IN_ALBUM, default, default, callback);
         }
 
         public Task<byte[]?> DownloadBytes(MediaItem mediaItem, int? maxWidth = null, int? maxHeight = null, bool crop = false, bool download = false)
